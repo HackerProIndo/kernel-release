@@ -67,8 +67,12 @@ jobs:
               payload = {"timeout": timeout, "limit": limit}
               if offset is not None:
                   payload["offset"] = offset
-              response = telegram_request("getUpdates", payload, timeout=timeout)
-              return response.get("result", []) or []
+              try:
+                  response = telegram_request("getUpdates", payload, timeout=timeout)
+                  return response.get("result", []) or []
+              except Exception as e:
+                  print(f"getUpdates failed or timed out: {e}")
+                  return []
 
           def get_group_chat_ids():
               ids = set()
