@@ -1,0 +1,160 @@
+name: Notify Telegram on ZygiskNext release
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - id: fetch_release
+        name: Fetch latest ZygiskNext release and notify Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json, os, sys, html, urllib.request, urllib.parse
+
+          repo = "Dr-TSNG/ZygiskNext"
+          api = f"https://api.github.com/repos/{repo}/releases/latest"
+
+          try:
+              with urllib.request.urlopen(api, timeout=30) as r:
+                  data = json.load(r)
+          except Exception as e:
+              print("Failed to fetch release:", e)
+              sys.exit(1)
+
+          tag = (data.get("tag_name") or "").strip()
+          release_name = (data.get("name") or "").strip()
+          body = (data.get("body_text") or data.get("body_html") or data.get("body") or "").strip()
+          body = html.escape(body)
+          html_url = (data.get("html_url") or "").strip()
+          apk_url = ""
+          apk_name = ""
+
+          for a in data.get("assets", []):
+              name = (a.get("name") or "").strip()
+              if name.lower().endswith(".apk"):
+                  apk_url = (a.get("browser_download_url") or "").strip()
+                  apk_name = name
+                  break
+
+          title = apk_name or release_name or tag or repo
+
+          last_path = ".github/last_announced_tag.txt"
+          last = ""
+          if os.path.isfile(last_path):
+              try:
+                  with open(last_path, "r", encoding="utf-8") as f:
+                      last = f.read().strip()
+              except Exception:
+                  last = ""
+
+          if tag == last:
+              print("No new release to announce (tag unchanged).")
+              sys.exit(0)
+
+          changelog_link = f"<a href=\"{html_url}\">View changelog</a>" if html_url else "No changelog provided"
+          changelog_text = body if body else "No changelog provided"
+          apk_link = f"<a href=\"{apk_url}\">{html.escape(apk_name)}</a>" if apk_url else "Not available"
+          repo_link = f"<a href=\"https://github.com/{repo}\">ZygiskNext</a>"
+          release_link = f"<a href=\"{html_url}\">Release page</a>" if html_url else "-"
+
+          message = f"""
+          🚀 <b>ZygiskNext Release</b>
+
+          <b>Title:</b> {title}
+          <b>Version:</b> {tag}
+
+          <b>Changelog:</b> {changelog_link}
+          <pre>{changelog_text}</pre>
+
+          🔗 <b>Repository:</b> {repo_link}
+          📦 <b>Download APK:</b> {apk_link}
+          🔗 <b>Release Page:</b> {release_link}
+          """
+
+          reply_markup = {
+              "inline_keyboard": [
+                  [{"text": "Release page", "url": html_url}] if html_url else [],
+                  [{"text": "Download APK", "url": apk_url}] if apk_url else []
+              ]
+          }
+
+          data = {
+              "chat_id": os.environ.get("CHAT_ID"),
+              "text": message,
+              "parse_mode": "HTML",
+              "disable_web_page_preview": True,
+              "reply_markup": json.dumps(reply_markup)
+          }
+
+          encoded = urllib.parse.urlencode(data).encode()
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendMessage",
+              data=encoded,
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  resp.read()
+          except Exception as e:
+              print("Failed to send message:", e)
+              sys.exit(1)
+
+          if apk_url:
+              doc = {
+                  "chat_id": os.environ.get("CHAT_ID"),
+                  "document": apk_url,
+                  "caption": apk_name
+              }
+              try:
+                  with urllib.request.urlopen(
+                      urllib.request.Request(
+                          f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendDocument",
+                          data=urllib.parse.urlencode(doc).encode(),
+                          method="POST"
+                      ), timeout=60
+                  ) as r2:
+                      r2.read()
+              except Exception as e:
+                  print("Failed to send APK document (non-fatal):", e)
+
+          os.makedirs(".github", exist_ok=True)
+          try:
+              with open(last_path, "w", encoding="utf-8") as f:
+                  f.write(tag)
+          except Exception as e:
+              print("Failed to write last tag file:", e)
+              sys.exit(1)
+
+          if "GITHUB_OUTPUT" in os.environ:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+                  out.write(f"tag={tag}\n")
+
+          print("Notification sent and last tag updated.")
+          PY
+
+      - name: Commit and push updated tag
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last_announced_tag.txt || true
+          git commit -m "Update announced ZygiskNext release to ${{ steps.fetch_release.outputs.tag }}" || echo "No changes to commit"
+          git push origin HEAD:refs/heads/${{ github.ref_name }} || echo "Push blocked (protected branch?)"
