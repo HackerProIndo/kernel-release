@@ -24,6 +24,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          FORWARD_TO: ${{ secrets.FORWARD_TO }}
         run: |
           python - <<'PY'
           import json, os, sys, html, urllib.request, urllib.parse
@@ -112,10 +113,30 @@ jobs:
 
           try:
               with urllib.request.urlopen(req, timeout=30) as resp:
-                  resp.read()
+                  resp_data = json.load(resp)
           except Exception as e:
               print("Failed to send message:", e)
               sys.exit(1)
+
+          message_id = resp_data.get("result", {}).get("message_id")
+          forward_to = (os.environ.get("FORWARD_TO") or "@kamiinaEZTeH").strip()
+          if message_id and forward_to:
+              fwd = {
+                  "chat_id": forward_to,
+                  "from_chat_id": os.environ.get("CHAT_ID"),
+                  "message_id": message_id
+              }
+              try:
+                  with urllib.request.urlopen(
+                      urllib.request.Request(
+                          f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/forwardMessage",
+                          data=urllib.parse.urlencode(fwd).encode(),
+                          method="POST"
+                      ), timeout=30
+                  ) as resp2:
+                      resp2.read()
+              except Exception as e:
+                  print("Failed to forward message (non-fatal):", e)
 
           if apk_url:
               doc = {
