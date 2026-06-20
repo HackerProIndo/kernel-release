@@ -1,0 +1,69 @@
+name: Notify Telegram on KernelSU release
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch latest KernelSU release
+        id: release
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          url = "https://api.github.com/repos/tiann/KernelSU/releases/latest"
+          with urllib.request.urlopen(url) as r:
+              data = json.load(r)
+          tag = data["tag_name"]
+          name = data.get("name", "").replace("\n", " ").replace("\r", " ")
+          html_url = data["html_url"]
+          with open(os.environ["GITHUB_OUTPUT"], "w") as out:
+              out.write(f"tag={tag}\n")
+              out.write(f"name={name}\n")
+              out.write(f"url={html_url}\n")
+          PY
+
+      - name: Load last announced tag
+        id: last
+        run: |
+          LAST=""
+          if [ -f .github/last_announced_tag.txt ]; then
+            LAST="$(cat .github/last_announced_tag.txt)"
+          fi
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram
+        if: steps.last.outputs.last != steps.release.outputs.tag
+        run: |
+          cat > message.txt <<'EOF'
+New KernelSU release!
+Repo: tiann/KernelSU
+Tag: ${{ steps.release.outputs.tag }}
+Name: ${{ steps.release.outputs.name }}
+Link: ${{ steps.release.outputs.url }}
+EOF
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            --data-urlencode chat_id="${{ secrets.CHAT_ID }}" \
+            --data-urlencode text@message.txt
+
+      - name: Save announced tag
+        if: steps.last.outputs.last != steps.release.outputs.tag
+        run: |
+          mkdir -p .github
+          echo "${{ steps.release.outputs.tag }}" > .github/last_announced_tag.txt
+
+      - name: Commit and push updated tag
+        if: steps.last.outputs.last != steps.release.outputs.tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last_announced_tag.txt
+          git commit -m "Update announced KernelSU release to ${{ steps.release.outputs.tag }}"
+          git push
