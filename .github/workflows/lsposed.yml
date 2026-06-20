@@ -1,0 +1,237 @@
+name: Notify Telegram on LSPosed Channel
+
+permissions:
+contents: write
+
+on:
+schedule:
+- cron: '*/5 * * * *'
+workflow_dispatch:
+
+jobs:
+notify:
+runs-on: ubuntu-latest
+
+steps:
+  - name: Checkout repo
+    uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+      persist-credentials: true
+
+  - id: fetch_post
+    name: Fetch latest LSPosed post and notify Telegram
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    run: |
+      python - <<'PY'
+      import json
+      import os
+      import re
+      import sys
+      import html
+      import urllib.request
+      import urllib.parse
+
+      channel_url = "https://t.me/s/LSPosed"
+
+      try:
+          with urllib.request.urlopen(channel_url, timeout=30) as r:
+              page = r.read().decode("utf-8", "ignore")
+      except Exception as e:
+          print("Failed to fetch channel:", e)
+          sys.exit(1)
+
+      posts = re.findall(
+          r'data-post="LSPosed/(\d+)".*?<div class="tgme_widget_message_text[^"]*">(.*?)</div>',
+          page,
+          re.S
+      )
+
+      if not posts:
+          print("No posts found")
+          sys.exit(1)
+
+      tag, body = posts[-1]
+
+      body = re.sub(r"<br\s*/?>", "\n", body)
+      body = re.sub(r"<.*?>", "", body)
+      body = html.escape(body.strip())
+
+      post_url = f"https://t.me/LSPosed/{tag}"
+      title = f"LSPosed Post #{tag}"
+
+      last_path = ".github/last_announced_lsposed.txt"
+
+      last = ""
+      if os.path.isfile(last_path):
+          try:
+              with open(last_path, "r", encoding="utf-8") as f:
+                  last = f.read().strip()
+          except Exception:
+              pass
+
+      if tag == last:
+          print("No new post.")
+          sys.exit(0)
+
+      message = f"""
+
+📢 <b>LSPosed New Post</b>
+
+<b>Title:</b> {title}
+
+<pre>{body}</pre>🔗 <a href="{post_url}">Open Post</a>
+"""
+
+      reply_markup = {
+          "inline_keyboard": [
+              [
+                  {
+                      "text": "Open Post",
+                      "url": post_url
+                  }
+              ]
+          ]
+      }
+
+      payload_template = {
+          "text": message,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": False,
+          "reply_markup": json.dumps(reply_markup)
+      }
+
+      def get_group_chat_ids():
+          ids = set()
+
+          groups_file = ".github/group_chat_ids.txt"
+
+          if os.path.isfile(groups_file):
+              try:
+                  with open(groups_file, "r", encoding="utf-8") as f:
+                      for line in f:
+                          line = line.strip()
+                          if line:
+                              ids.add(line)
+              except Exception:
+                  pass
+
+          try:
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/getUpdates",
+                  data=urllib.parse.urlencode({
+                      "timeout": 0,
+                      "limit": 100
+                  }).encode(),
+                  method="POST"
+              )
+
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  updates = json.load(r).get("result", [])
+          except Exception:
+              updates = []
+
+          last_update_id = None
+
+          for upd in updates:
+              chat = None
+
+              if "message" in upd:
+                  chat = upd["message"].get("chat")
+              elif "edited_message" in upd:
+                  chat = upd["edited_message"].get("chat")
+              elif "channel_post" in upd:
+                  chat = upd["channel_post"].get("chat")
+              elif "edited_channel_post" in upd:
+                  chat = upd["edited_channel_post"].get("chat")
+              elif "my_chat_member" in upd:
+                  chat = upd["my_chat_member"].get("chat")
+
+              if chat and chat.get("type") in ["group", "supergroup"]:
+                  ids.add(str(chat["id"]))
+
+              if upd.get("update_id") is not None:
+                  last_update_id = max(
+                      last_update_id or -1,
+                      upd["update_id"]
+                  )
+
+          if last_update_id is not None:
+              try:
+                  urllib.request.urlopen(
+                      urllib.request.Request(
+                          f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/getUpdates",
+                          data=urllib.parse.urlencode({
+                              "offset": last_update_id + 1
+                          }).encode(),
+                          method="POST"
+                      ),
+                      timeout=30
+                  )
+              except Exception:
+                  pass
+
+          if ids:
+              try:
+                  with open(groups_file, "w", encoding="utf-8") as f:
+                      for cid in sorted(ids):
+                          f.write(str(cid) + "\n")
+              except Exception:
+                  pass
+
+          return ids
+
+      chat_ids = []
+
+      if os.environ.get("CHAT_ID"):
+          chat_ids.append(os.environ["CHAT_ID"])
+
+      for cid in get_group_chat_ids():
+          if cid not in chat_ids:
+              chat_ids.append(cid)
+
+      for i, chat_id in enumerate(chat_ids):
+          try:
+              payload = payload_template.copy()
+              payload["chat_id"] = chat_id
+
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
+                  data=urllib.parse.urlencode(payload).encode(),
+                  method="POST"
+              )
+
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  r.read()
+
+          except Exception as e:
+              print(f"Failed to send to {chat_id}: {e}")
+
+              if i == 0:
+                  sys.exit(1)
+
+      os.makedirs(".github", exist_ok=True)
+
+      with open(last_path, "w", encoding="utf-8") as f:
+          f.write(tag)
+
+      if "GITHUB_OUTPUT" in os.environ:
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"tag={tag}\n")
+
+      print("Notification sent.")
+      PY
+
+  - name: Commit and push updated state
+    if: always()
+    run: |
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      git add .github/last_announced_lsposed.txt .github/group_chat_ids.txt || true
+
+      git commit -m "Update LSPosed state ${{ steps.fetch_post.outputs.tag }}" || echo "No changes"
+
+      git push origin HEAD:refs/heads/${{ github.ref_name }} || echo "Push blocked"
