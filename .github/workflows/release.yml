@@ -25,6 +25,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
+          python - <<'PY'
           import json, os, sys, urllib.request, urllib.parse
 
           repo = "tiann/KernelSU"
@@ -132,6 +133,7 @@ jobs:
                   out.write(f"tag={tag}\n")
 
           print("Notification sent and last tag updated.")
+          PY
 
       - name: Commit and push updated tag
         if: always()
