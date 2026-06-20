@@ -44,13 +44,19 @@ jobs:
           fi
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Telegram
+            - name: Notify Telegram
         if: steps.last.outputs.last != steps.release.outputs.tag
         run: |
-          TEXT="CHANGELOG%0ATITLE: ${{ steps.release.outputs.title }}%0ATag: ${{ steps.release.outputs.tag }}%0ALink: ${{ steps.release.outputs.url }}"
+          cat > message.txt <<'EOF'
+          CHANGELOG
+          TITLE: ${{ steps.release.outputs.title }}
+          Tag: ${{ steps.release.outputs.tag }}
+          Link: ${{ steps.release.outputs.url }}
+          EOF
+
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             --data-urlencode chat_id="${{ secrets.CHAT_ID }}" \
-            --data-urlencode text="$TEXT"
+            --data-urlencode text@message.txt
 
       - name: Save announced tag
         if: steps.last.outputs.last != steps.release.outputs.tag
