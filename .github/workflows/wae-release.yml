@@ -118,9 +118,9 @@ jobs:
               print("Failed to send message:", e)
               sys.exit(1)
 
-          message_id = resp_data.get("result", {}).get("message_id")
           forward_to = (os.environ.get("FORWARD_TO") or "@kamiinaEZTeH").strip()
-          if message_id and forward_to:
+          message_id = resp_data.get("result", {}).get("message_id")
+          if forward_to and message_id:
               fwd = {
                   "chat_id": forward_to,
                   "from_chat_id": os.environ.get("CHAT_ID"),
