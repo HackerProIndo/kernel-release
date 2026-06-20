@@ -19,17 +19,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Fetch latest KernelSU release
-        id: release
+      - name: Fetch latest KernelSU release and notify Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python - <<'PY'
-          import json, os, urllib.request
-          url = "https://api.github.com/repos/tiann/KernelSU/releases/latest"
-          with urllib.request.urlopen(url) as r:
-              data = json.load(r)
+          import json, os, sys, urllib.request, urllib.parse
+
+          repo = "tiann/KernelSU"
+          api = f"https://api.github.com/repos/{repo}/releases/latest"
+
+          try:
+              with urllib.request.urlopen(api, timeout=30) as r:
+                  data = json.load(r)
+          except Exception as e:
+              print("Failed to fetch release:", e)
+              sys.exit(1)
+
           tag = data.get("tag_name", "") or ""
-          title = (data.get("name", "") or "").strip().replace("\n", " ").replace("\r", " ")
-          body = (data.get("body", "") or "").strip().replace("\n", " ").replace("\r", " ")
+          title = (data.get("name") or "").strip()
+          body = (data.get("body") or "").strip()
           html_url = data.get("html_url", "") or ""
           apk_url = ""
           apk_name = ""
@@ -39,113 +49,91 @@ jobs:
                   apk_url = a.get("browser_download_url", "") or ""
                   apk_name = name
                   break
-          out = os.environ["GITHUB_OUTPUT"]
-          with open(out, "w") as o:
-              o.write(f"tag={tag}\n")
-              o.write(f"title={title}\n")
-              o.write(f"body={body}\n")
-              o.write(f"url={html_url}\n")
-              o.write(f"apk_url={apk_url}\n")
-              o.write(f"apk_name={apk_name}\n")
-          PY
 
-      - name: Load last announced tag
-        id: last
-        run: |
-          LAST=""
-          if [ -f .github/last_announced_tag.txt ]; then
-            LAST="$(cat .github/last_announced_tag.txt)"
-          fi
-          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+          # read last announced tag
+          last_path = ".github/last_announced_tag.txt"
+          last = ""
+          if os.path.isfile(last_path):
+              try:
+                  with open(last_path, "r", encoding="utf-8") as f:
+                      last = f.read().strip()
+              except:
+                  last = ""
 
-      - name: Notify Telegram (pretty Markdown + optional APK)
-        if: steps.last.outputs.last != steps.release.outputs.tag
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_TITLE: ${{ steps.release.outputs.title }}
-          RELEASE_URL: ${{ steps.release.outputs.url }}
-          RELEASE_BODY: ${{ steps.release.outputs.body }}
-          APK_URL: ${{ steps.release.outputs.apk_url }}
-          APK_NAME: ${{ steps.release.outputs.apk_name }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: |
-          python - <<'PY'
-          import os, urllib.request, urllib.parse
+          if tag == last:
+              print("No new release to announce (tag unchanged).")
+              sys.exit(0)
 
-          def escape_md_v2(s: str) -> str:
-              if not s:
-                  return ""
-              # Escape characters required by MarkdownV2
-              for ch in r'\_*[]()~`>#+-=|{}.!':
-                  s = s.replace(ch, '\\' + ch)
-              return s
-
-          title = escape_md_v2(os.getenv("RELEASE_TITLE") or "")
-          tag = escape_md_v2(os.getenv("RELEASE_TAG") or "")
-          url = os.getenv("RELEASE_URL") or ""
-          body = escape_md_v2(os.getenv("RELEASE_BODY") or "")
-          apk_url = os.getenv("APK_URL") or ""
-          apk_name = escape_md_v2(os.getenv("APK_NAME") or "")
-
-          parts = [
-            "*CHANGELOG*",
-            f"*TITLE:* {title}" if title else "",
-            f"*Tag:* `{tag}`" if tag else ""
-          ]
+          # compose message with full changelog (plain text)
+          parts = []
+          parts.append("Manager")
+          if title:
+              parts.append(f"TITLE: {title}")
+          if tag:
+              parts.append(f"Tag: {tag}")
           if body:
-            parts.append("*Notes:*")
-            parts.append((body[:800] + ("..." if len(body) > 800 else "")).strip())
+              parts.append("Changelog:")
+              parts.append(body)
           if apk_url:
-            parts.append(f"[Download APK]({apk_url})")
-          if url:
-            parts.append(f"[Release page]({url})")
+              parts.append(f"APK: {apk_url}")
+          if html_url:
+              parts.append(f"Release page: {html_url}")
 
-          # remove empty parts and join with blank lines for readability
-          message = "\n\n".join([p for p in parts if p])
+          message = "\n\n".join(parts)
+          # Telegram limits: 4096 chars, truncate if needed
+          if len(message) > 3800:
+              message = message[:3800] + "\n\n... (truncated)"
 
           data = {
-            "chat_id": os.getenv("CHAT_ID"),
-            "text": message,
-            "parse_mode": "MarkdownV2",
-            "disable_web_page_preview": "false"
+              "chat_id": os.environ.get("CHAT_ID"),
+              "text": message
           }
 
-          req = urllib.request.Request(
-            f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}/sendMessage",
-            data=urllib.parse.urlencode(data).encode(),
-            method="POST"
-          )
-          with urllib.request.urlopen(req) as resp:
-            resp.read()
+          encoded = urllib.parse.urlencode(data).encode()
+          req = urllib.request.Request(f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendMessage", data=encoded, method="POST")
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  resp.read()
+          except Exception as e:
+              print("Failed to send message:", e)
+              sys.exit(1)
 
-          # Optionally send the APK as a document (Telegram will fetch the URL)
+          # optionally send APK as document (Telegram will fetch the URL)
           if apk_url:
-            doc = {
-              "chat_id": os.getenv("CHAT_ID"),
-              "document": apk_url,
-              "caption": apk_name
-            }
-            req2 = urllib.request.Request(
-              f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}/sendDocument",
-              data=urllib.parse.urlencode(doc).encode(),
-              method="POST"
-            )
-            with urllib.request.urlopen(req2) as r2:
-              r2.read()
+              doc = {
+                  "chat_id": os.environ.get("CHAT_ID"),
+                  "document": apk_url,
+                  "caption": apk_name
+              }
+              try:
+                  with urllib.request.urlopen(
+                      urllib.request.Request(
+                          f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendDocument",
+                          data=urllib.parse.urlencode(doc).encode(),
+                          method="POST"
+                      ), timeout=60
+                  ) as r2:
+                      r2.read()
+              except Exception as e:
+                  print("Failed to send APK document (non-fatal):", e)
+
+          # write new last tag (the commit step will push it)
+          os.makedirs(".github", exist_ok=True)
+          try:
+              with open(last_path, "w", encoding="utf-8") as f:
+                  f.write(tag)
+          except Exception as e:
+              print("Failed to write last tag file:", e)
+              sys.exit(1)
+
+          print("Notification sent and last tag updated.")
           PY
 
-      - name: Save announced tag
-        if: steps.last.outputs.last != steps.release.outputs.tag
-        run: |
-          mkdir -p .github
-          echo "${{ steps.release.outputs.tag }}" > .github/last_announced_tag.txt
-
       - name: Commit and push updated tag
-        if: steps.last.outputs.last != steps.release.outputs.tag
+        if: steps.notify.outputs == '' || always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/last_announced_tag.txt
+          git add .github/last_announced_tag.txt || true
           git commit -m "Update announced KernelSU release to ${{ steps.release.outputs.tag }}" || echo "No changes to commit"
           git push origin HEAD:refs/heads/${{ github.ref_name }} || echo "Push blocked (protected branch?)"
