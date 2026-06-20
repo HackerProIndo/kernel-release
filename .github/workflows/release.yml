@@ -1,5 +1,8 @@
 name: Notify Telegram on KernelSU release
 
+permissions:
+  contents: write
+
 on:
   schedule:
     - cron: '*/5 * * * *'
@@ -11,6 +14,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Fetch latest KernelSU release
         id: release
@@ -59,4 +65,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/last_announced_tag.txt
           git commit -m "Update announced KernelSU release to ${{ steps.release.outputs.tag }}"
-          git push
+          git push origin HEAD:refs/heads/${{ github.ref_name }}
