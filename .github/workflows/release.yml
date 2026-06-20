@@ -27,27 +27,24 @@ jobs:
           url = "https://api.github.com/repos/tiann/KernelSU/releases/latest"
           with urllib.request.urlopen(url) as r:
               data = json.load(r)
-          tag = data.get("tag_name", "")
-          title = data.get("name", "").strip()
-          body = data.get("body", "").strip()
-          html_url = data.get("html_url", "")
+          tag = data.get("tag_name", "") or ""
+          title = (data.get("name", "") or "").strip().replace("\n", " ").replace("\r", " ")
+          body = (data.get("body", "") or "").strip().replace("\n", " ").replace("\r", " ")
+          html_url = data.get("html_url", "") or ""
           apk_url = ""
           apk_name = ""
           for a in data.get("assets", []):
-              name = a.get("name", "")
+              name = a.get("name", "") or ""
               if name.lower().endswith(".apk"):
-                  apk_url = a.get("browser_download_url", "")
+                  apk_url = a.get("browser_download_url", "") or ""
                   apk_name = name
                   break
           out = os.environ["GITHUB_OUTPUT"]
           with open(out, "w") as o:
               o.write(f"tag={tag}\n")
               o.write(f"title={title}\n")
+              o.write(f"body={body}\n")
               o.write(f"url={html_url}\n")
-              # multiline output for body
-              o.write("body<<EOF\\n")
-              o.write(body + "\\n")
-              o.write("EOF\\n")
               o.write(f"apk_url={apk_url}\n")
               o.write(f"apk_name={apk_name}\n")
           PY
@@ -74,39 +71,38 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python - <<'PY'
-          import os, urllib.request, urllib.parse, textwrap
+          import os, urllib.request, urllib.parse
 
           def escape_md_v2(s: str) -> str:
               if not s:
                   return ""
-              # Characters that must be escaped in MarkdownV2
-              for ch in r'_ * [ ] ( ) ~ ` > # + - = | { } . !'.split():
+              # Escape characters required by MarkdownV2
+              for ch in r'\_*[]()~`>#+-=|{}.!':
                   s = s.replace(ch, '\\' + ch)
               return s
 
           title = escape_md_v2(os.getenv("RELEASE_TITLE") or "")
           tag = escape_md_v2(os.getenv("RELEASE_TAG") or "")
           url = os.getenv("RELEASE_URL") or ""
-          body = os.getenv("RELEASE_BODY") or ""
-          body = body.strip()
-          # take a short excerpt of body
-          excerpt = escape_md_v2((body[:800] + ("..." if len(body) > 800 else "")).strip())
+          body = escape_md_v2(os.getenv("RELEASE_BODY") or "")
           apk_url = os.getenv("APK_URL") or ""
           apk_name = escape_md_v2(os.getenv("APK_NAME") or "")
 
           parts = [
             "*CHANGELOG*",
-            f"*TITLE:* {title}",
-            f"*Tag:* `{tag}`"
+            f"*TITLE:* {title}" if title else "",
+            f"*Tag:* `{tag}`" if tag else ""
           ]
-          if excerpt:
+          if body:
             parts.append("*Notes:*")
-            parts.append(excerpt)
+            parts.append((body[:800] + ("..." if len(body) > 800 else "")).strip())
           if apk_url:
             parts.append(f"[Download APK]({apk_url})")
-          parts.append(f"[Release page]({url})")
+          if url:
+            parts.append(f"[Release page]({url})")
 
-          message = "\n\n".join(parts)
+          # remove empty parts and join with blank lines for readability
+          message = "\n\n".join([p for p in parts if p])
 
           data = {
             "chat_id": os.getenv("CHAT_ID"),
