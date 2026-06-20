@@ -44,19 +44,48 @@ jobs:
           fi
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
 
-            - name: Notify Telegram
+      - name: Notify Telegram
         if: steps.last.outputs.last != steps.release.outputs.tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.release.outputs.title }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          cat > message.txt <<'EOF'
-          CHANGELOG
-          TITLE: ${{ steps.release.outputs.title }}
-          Tag: ${{ steps.release.outputs.tag }}
-          Link: ${{ steps.release.outputs.url }}
-          EOF
+          python - <<'PY'
+          import os, urllib.request, urllib.parse
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            --data-urlencode chat_id="${{ secrets.CHAT_ID }}" \
-            --data-urlencode text@message.txt
+          def escape_md(text):
+              for ch in r"_*[]()~`>#+-=|{}.!":
+                  text = text.replace(ch, "\\" + ch)
+              return text
+
+          title = escape_md(os.environ["RELEASE_TITLE"])
+          tag = escape_md(os.environ["RELEASE_TAG"])
+          url = escape_md(os.environ["RELEASE_URL"])
+
+          message = "\n".join([
+              "*CHANGELOG*",
+              f"*TITLE:* {title}",
+              f"*Tag:* `{tag}`",
+              f"*Link:* {url}"
+          ])
+
+          data = {
+              "chat_id": os.environ["CHAT_ID"],
+              "text": message,
+              "parse_mode": "MarkdownV2"
+          }
+
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
+              data=urllib.parse.urlencode(data).encode(),
+              method="POST"
+          )
+          with urllib.request.urlopen(req) as resp:
+              resp.read()
+          PY
 
       - name: Save announced tag
         if: steps.last.outputs.last != steps.release.outputs.tag
