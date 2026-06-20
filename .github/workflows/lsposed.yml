@@ -132,6 +132,7 @@ jobs:
 
           offset = last_update_id + 1 if last_update_id is not None else None
           updates = get_updates(offset=offset, timeout=30, limit=100)
+          print(f"Checking updates: offset={offset} updates={len(updates)} initial_scan={initial_scan} last_update_id={last_update_id} last_message_id={last_message_id}")
 
           new_posts = []
           max_update_id = last_update_id if last_update_id is not None else -1
@@ -158,9 +159,9 @@ jobs:
               new_posts.append((message_id, chat.get("id")))
 
           if initial_scan:
-              if highest_message_id > last_message_id:
-                  write_state(max_update_id, highest_message_id)
-              print(f"Initialized LSPosed channel state at message {highest_message_id}.")
+              init_update_id = max_update_id if max_update_id >= 0 else 0
+              write_state(init_update_id, highest_message_id)
+              print(f"Initialized LSPosed channel state at update {init_update_id}, message {highest_message_id}.")
               sys.exit(0)
 
           if max_update_id >= 0 and max_update_id != (last_update_id or -1):
