@@ -41,17 +41,10 @@ jobs:
       - name: Notify Telegram
         if: steps.last.outputs.last != steps.release.outputs.tag
         run: |
-          cat > message.txt <<'EOF'
-New KernelSU release!
-Repo: tiann/KernelSU
-Tag: ${{ steps.release.outputs.tag }}
-Name: ${{ steps.release.outputs.name }}
-Link: ${{ steps.release.outputs.url }}
-EOF
-
+          TEXT="New KernelSU release!%0ARepo: tiann/KernelSU%0ATag: ${{ steps.release.outputs.tag }}%0AName: ${{ steps.release.outputs.name }}%0ALink: ${{ steps.release.outputs.url }}"
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             --data-urlencode chat_id="${{ secrets.CHAT_ID }}" \
-            --data-urlencode text@message.txt
+            --data-urlencode text="$TEXT"
 
       - name: Save announced tag
         if: steps.last.outputs.last != steps.release.outputs.tag
