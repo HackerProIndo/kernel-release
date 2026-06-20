@@ -26,7 +26,7 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python - <<'PY'
-          import json, os, sys, urllib.request, urllib.parse
+          import json, os, sys, html, urllib.request, urllib.parse
 
           repo = "tiann/KernelSU"
           api = f"https://api.github.com/repos/{repo}/releases/latest"
@@ -40,7 +40,8 @@ jobs:
 
           tag = (data.get("tag_name") or "").strip()
           release_name = (data.get("name") or "").strip()
-          body = (data.get("body") or "").strip()
+          body = (data.get("body_text") or data.get("body_html") or data.get("body") or "").strip()
+          body = html.escape(body)
           html_url = (data.get("html_url") or "").strip()
           apk_url = ""
           apk_name = ""
