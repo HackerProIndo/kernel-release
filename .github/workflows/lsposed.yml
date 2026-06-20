@@ -20,7 +20,7 @@ jobs:
           persist-credentials: true
 
       - id: fetch_channel
-        name: Fetch latest LSPosed Telegram channel post and copy it to target chats
+        name: Fetch latest LSPosed Telegram channel post and forward it to target chats
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -187,7 +187,7 @@ jobs:
               for i, chat_id in enumerate(destination_chats):
                   try:
                       telegram_request(
-                          "copyMessage",
+                          "forwardMessage",
                           {
                               "chat_id": chat_id,
                               "from_chat_id": from_chat_id,
@@ -197,13 +197,13 @@ jobs:
                       )
                       copied_count += 1
                   except Exception as e:
-                      print(f"Failed to copy message {message_id} to {chat_id}:", e)
+                      print(f"Failed to forward message {message_id} to {chat_id}:", e)
                       if i == 0:
                           sys.exit(1)
               highest_message_id = max(highest_message_id, message_id)
 
           write_state(max_update_id, highest_message_id)
-          print(f"Copied {copied_count} new message(s) from @{channel_username}.")
+          print(f"Forwarded {copied_count} new message(s) from @{channel_username}.")
           PY
 
       - name: Commit and push updated channel state
