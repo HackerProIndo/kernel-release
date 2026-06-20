@@ -56,7 +56,7 @@ jobs:
 
           title = apk_name or release_name or tag or repo
 
-          last_path = ".github/last_announced_tag.txt"
+          last_path = ".github/last_announced_zygisk.txt"
           last = ""
           if os.path.isfile(last_path):
               try:
