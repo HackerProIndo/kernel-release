@@ -79,14 +79,25 @@ jobs:
           if html_url:
               parts.append(f"Release page: {html_url}")
 
-          message = "\n\n".join(parts)
-          # Telegram limits: 4096 chars, truncate if needed
-          if len(message) > 3800:
-              message = message[:3800] + "\n\n... (truncated)"
+          message = f"""
+          🚀 <b>Manager KernelSU Release</b>
+
+              <b>Version:</b> {tag}
+              <b>Title:</b> {title if title else '-'} 
+
+              <b>Changelog:</b>
+              <tg-spoiler>{body if body else 'No changelog provided'}</tg-spoiler>
+
+          🔗 <b>Repository:</b> https://github.com/tiann/KernelSU
+          📦 <b>Download APK:</b> {apk_url if apk_url else 'Not available'}
+          🔗 <b>Release Page:</b> {html_url if html_url else '-'}
+          """
 
           data = {
-              "chat_id": os.environ.get("CHAT_ID"),
-              "text": message
+          "chat_id": os.environ.get("CHAT_ID"),
+          "text": message,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": True
           }
 
           encoded = urllib.parse.urlencode(data).encode()
