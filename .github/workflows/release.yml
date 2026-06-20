@@ -4,9 +4,9 @@ permissions:
   contents: write
 
 on:
+  release: 
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch:
 
 jobs:
   notify:
