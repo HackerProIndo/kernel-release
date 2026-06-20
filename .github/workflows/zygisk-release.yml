@@ -103,37 +103,112 @@ jobs:
               "reply_markup": json.dumps(reply_markup)
           }
 
-          encoded = urllib.parse.urlencode(data).encode()
-          req = urllib.request.Request(
-              f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendMessage",
-              data=encoded,
-              method="POST"
-          )
+          def get_group_chat_ids():
+              ids = set()
+              groups_file = ".github/group_chat_ids.txt"
+              if os.path.isfile(groups_file):
+                  try:
+                      with open(groups_file, "r", encoding="utf-8") as f:
+                          for line in f:
+                              line = line.strip()
+                              if line:
+                                  ids.add(line)
+                  except Exception:
+                      pass
 
-          try:
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  resp.read()
-          except Exception as e:
-              print("Failed to send message:", e)
-              sys.exit(1)
+              try:
+                  upd_data = {"timeout": 0, "limit": 100}
+                  with urllib.request.urlopen(
+                      urllib.request.Request(
+                          f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/getUpdates",
+                          data=urllib.parse.urlencode(upd_data).encode(),
+                          method="POST"
+                      ), timeout=30
+                  ) as res:
+                      updates = json.load(res).get("result", []) or []
+              except Exception:
+                  updates = []
+
+              last_update_id = None
+              for upd in updates:
+                  chat = None
+                  if "message" in upd:
+                      chat = upd["message"].get("chat")
+                  elif "edited_message" in upd:
+                      chat = upd["edited_message"].get("chat")
+                  elif "my_chat_member" in upd:
+                      chat = upd["my_chat_member"].get("chat")
+                  elif "channel_post" in upd:
+                      chat = upd["channel_post"].get("chat")
+                  elif "edited_channel_post" in upd:
+                      chat = upd["edited_channel_post"].get("chat")
+                  if chat and chat.get("type") in ["group", "supergroup"]:
+                      ids.add(str(chat.get("id")))
+                  if upd.get("update_id") is not None:
+                      last_update_id = max(last_update_id or -1, upd.get("update_id", -1))
+
+              if last_update_id is not None:
+                  try:
+                      with urllib.request.urlopen(
+                          urllib.request.Request(
+                              f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/getUpdates",
+                              data=urllib.parse.urlencode({"offset": last_update_id + 1}).encode(),
+                              method="POST"
+                          ), timeout=30
+                      ) as _:
+                          pass
+                  except Exception:
+                      pass
+
+              if ids:
+                  try:
+                      with open(groups_file, "w", encoding="utf-8") as f:
+                          for cid in sorted(ids, key=lambda x: int(x) if x.lstrip('-').isdigit() else x):
+                              f.write(str(cid) + "\n")
+                  except Exception:
+                      pass
+              return ids
+
+          chat_ids = [os.environ.get("CHAT_ID")] if os.environ.get("CHAT_ID") else []
+          for cid in get_group_chat_ids():
+              if cid and cid not in chat_ids:
+                  chat_ids.append(cid)
+
+          for i, chat in enumerate(chat_ids):
+              try:
+                  payload = data.copy()
+                  payload["chat_id"] = chat
+                  encoded = urllib.parse.urlencode(payload).encode()
+                  req = urllib.request.Request(
+                      f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendMessage",
+                      data=encoded,
+                      method="POST"
+                  )
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      resp.read()
+              except Exception as e:
+                  print(f"Failed to send message to {chat}:", e)
+                  if i == 0:
+                      sys.exit(1)
 
           if apk_url:
-              doc = {
-                  "chat_id": os.environ.get("CHAT_ID"),
+              doc_template = {
                   "document": apk_url,
                   "caption": apk_name
               }
-              try:
-                  with urllib.request.urlopen(
-                      urllib.request.Request(
-                          f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendDocument",
-                          data=urllib.parse.urlencode(doc).encode(),
-                          method="POST"
-                      ), timeout=60
-                  ) as r2:
-                      r2.read()
-              except Exception as e:
-                  print("Failed to send APK document (non-fatal):", e)
+              for chat in chat_ids:
+                  doc = {"chat_id": chat, **doc_template}
+                  try:
+                      with urllib.request.urlopen(
+                          urllib.request.Request(
+                              f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendDocument",
+                              data=urllib.parse.urlencode(doc).encode(),
+                              method="POST"
+                          ), timeout=60
+                      ) as r2:
+                          r2.read()
+                  except Exception as e:
+                      print(f"Failed to send APK document to {chat} (non-fatal):", e)
 
           os.makedirs(".github", exist_ok=True)
           try:
@@ -155,6 +230,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/last_announced_tag.txt || true
+          git add .github/last_announced_tag.txt .github/group_chat_ids.txt || true
           git commit -m "Update announced ZygiskNext release to ${{ steps.fetch_release.outputs.tag }}" || echo "No changes to commit"
           git push origin HEAD:refs/heads/${{ github.ref_name }} || echo "Push blocked (protected branch?)"
