@@ -77,13 +77,12 @@ steps:
           sys.exit(0)
 
       message = f"""
+      📢 <b>LSPosed New Post</b>
 
-📢 <b>LSPosed New Post</b>
+      <b>Title:</b> {title}
 
-<b>Title:</b> {title}
-
-<pre>{body}</pre>🔗 <a href="{post_url}">Open Post</a>
-"""
+      <pre>{body}</pre>🔗 <a href="{post_url}">Open Post</a>
+      """
 
       reply_markup = {
           "inline_keyboard": [
