@@ -6,7 +6,6 @@ permissions:
 on:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch:
 
 jobs:
   notify:
@@ -27,13 +26,14 @@ jobs:
           with urllib.request.urlopen(url) as r:
               data = json.load(r)
           tag = data["tag_name"]
-          name = data.get("name", "").replace("\n", " ").replace("\r", " ")
+          title = data.get("name", "").strip().replace("\n", " ").replace("\r", " ")
           html_url = data["html_url"]
           with open(os.environ["GITHUB_OUTPUT"], "w") as out:
               out.write(f"tag={tag}\n")
-              out.write(f"name={name}\n")
+              out.write(f"title={title}\n")
               out.write(f"url={html_url}\n")
           PY
+
       - name: Load last announced tag
         id: last
         run: |
@@ -42,18 +42,21 @@ jobs:
             LAST="$(cat .github/last_announced_tag.txt)"
           fi
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
+
       - name: Notify Telegram
         if: steps.last.outputs.last != steps.release.outputs.tag
         run: |
-          TEXT="New KernelSU release!%0ARepo: tiann/KernelSU%0ATag: ${{ steps.release.outputs.tag }}%0AName: ${{ steps.release.outputs.name }}%0ALink: ${{ steps.release.outputs.url }}"
+          TEXT="CHANGELOG%0ATITLE: ${{ steps.release.outputs.title }}%0ATag: ${{ steps.release.outputs.tag }}%0ALink: ${{ steps.release.outputs.url }}"
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             --data-urlencode chat_id="${{ secrets.CHAT_ID }}" \
             --data-urlencode text="$TEXT"
+
       - name: Save announced tag
         if: steps.last.outputs.last != steps.release.outputs.tag
         run: |
           mkdir -p .github
           echo "${{ steps.release.outputs.tag }}" > .github/last_announced_tag.txt
+
       - name: Commit and push updated tag
         if: steps.last.outputs.last != steps.release.outputs.tag
         run: |
