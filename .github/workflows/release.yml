@@ -13,7 +13,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
@@ -26,13 +27,29 @@ jobs:
           url = "https://api.github.com/repos/tiann/KernelSU/releases/latest"
           with urllib.request.urlopen(url) as r:
               data = json.load(r)
-          tag = data["tag_name"]
-          title = data.get("name", "").strip().replace("\n", " ").replace("\r", " ")
-          html_url = data["html_url"]
-          with open(os.environ["GITHUB_OUTPUT"], "w") as out:
-              out.write(f"tag={tag}\n")
-              out.write(f"title={title}\n")
-              out.write(f"url={html_url}\n")
+          tag = data.get("tag_name", "")
+          title = data.get("name", "").strip()
+          body = data.get("body", "").strip()
+          html_url = data.get("html_url", "")
+          apk_url = ""
+          apk_name = ""
+          for a in data.get("assets", []):
+              name = a.get("name", "")
+              if name.lower().endswith(".apk"):
+                  apk_url = a.get("browser_download_url", "")
+                  apk_name = name
+                  break
+          out = os.environ["GITHUB_OUTPUT"]
+          with open(out, "w") as o:
+              o.write(f"tag={tag}\n")
+              o.write(f"title={title}\n")
+              o.write(f"url={html_url}\n")
+              # multiline output for body
+              o.write("body<<EOF\\n")
+              o.write(body + "\\n")
+              o.write("EOF\\n")
+              o.write(f"apk_url={apk_url}\n")
+              o.write(f"apk_name={apk_name}\n")
           PY
 
       - name: Load last announced tag
@@ -44,47 +61,82 @@ jobs:
           fi
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Telegram
+      - name: Notify Telegram (pretty Markdown + optional APK)
         if: steps.last.outputs.last != steps.release.outputs.tag
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release.outputs.title }}
           RELEASE_URL: ${{ steps.release.outputs.url }}
+          RELEASE_BODY: ${{ steps.release.outputs.body }}
+          APK_URL: ${{ steps.release.outputs.apk_url }}
+          APK_NAME: ${{ steps.release.outputs.apk_name }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python - <<'PY'
-          import os, urllib.request, urllib.parse
+          import os, urllib.request, urllib.parse, textwrap
 
-          def escape_md(text):
-              for ch in r"_*[]()~`>#+-=|{}.!":
-                  text = text.replace(ch, "\\" + ch)
-              return text
+          def escape_md_v2(s: str) -> str:
+              if not s:
+                  return ""
+              # Characters that must be escaped in MarkdownV2
+              for ch in r'_ * [ ] ( ) ~ ` > # + - = | { } . !'.split():
+                  s = s.replace(ch, '\\' + ch)
+              return s
 
-          title = escape_md(os.environ["RELEASE_TITLE"])
-          tag = escape_md(os.environ["RELEASE_TAG"])
-          url = escape_md(os.environ["RELEASE_URL"])
+          title = escape_md_v2(os.getenv("RELEASE_TITLE") or "")
+          tag = escape_md_v2(os.getenv("RELEASE_TAG") or "")
+          url = os.getenv("RELEASE_URL") or ""
+          body = os.getenv("RELEASE_BODY") or ""
+          body = body.strip()
+          # take a short excerpt of body
+          excerpt = escape_md_v2((body[:800] + ("..." if len(body) > 800 else "")).strip())
+          apk_url = os.getenv("APK_URL") or ""
+          apk_name = escape_md_v2(os.getenv("APK_NAME") or "")
 
-          message = "\n".join([
-              "*CHANGELOG*",
-              f"*TITLE:* {title}",
-              f"*Tag:* `{tag}`",
-              f"*Link:* {url}"
-          ])
+          parts = [
+            "*CHANGELOG*",
+            f"*TITLE:* {title}",
+            f"*Tag:* `{tag}`"
+          ]
+          if excerpt:
+            parts.append("*Notes:*")
+            parts.append(excerpt)
+          if apk_url:
+            parts.append(f"[Download APK]({apk_url})")
+          parts.append(f"[Release page]({url})")
+
+          message = "\n\n".join(parts)
 
           data = {
-              "chat_id": os.environ["CHAT_ID"],
-              "text": message,
-              "parse_mode": "MarkdownV2"
+            "chat_id": os.getenv("CHAT_ID"),
+            "text": message,
+            "parse_mode": "MarkdownV2",
+            "disable_web_page_preview": "false"
           }
 
           req = urllib.request.Request(
-              f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
-              data=urllib.parse.urlencode(data).encode(),
-              method="POST"
+            f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}/sendMessage",
+            data=urllib.parse.urlencode(data).encode(),
+            method="POST"
           )
           with urllib.request.urlopen(req) as resp:
-              resp.read()
+            resp.read()
+
+          # Optionally send the APK as a document (Telegram will fetch the URL)
+          if apk_url:
+            doc = {
+              "chat_id": os.getenv("CHAT_ID"),
+              "document": apk_url,
+              "caption": apk_name
+            }
+            req2 = urllib.request.Request(
+              f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}/sendDocument",
+              data=urllib.parse.urlencode(doc).encode(),
+              method="POST"
+            )
+            with urllib.request.urlopen(req2) as r2:
+              r2.read()
           PY
 
       - name: Save announced tag
@@ -99,5 +151,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/last_announced_tag.txt
-          git commit -m "Update announced KernelSU release to ${{ steps.release.outputs.tag }}"
-          git push origin HEAD:refs/heads/${{ github.ref_name }}
+          git commit -m "Update announced KernelSU release to ${{ steps.release.outputs.tag }}" || echo "No changes to commit"
+          git push origin HEAD:refs/heads/${{ github.ref_name }} || echo "Push blocked (protected branch?)"
