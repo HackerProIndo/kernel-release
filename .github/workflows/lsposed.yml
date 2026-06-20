@@ -1,18 +1,18 @@
 name: Notify Telegram on LSPosed Channel
 
 permissions:
-contents: write
+ contents: write
 
 on:
-schedule:
-- cron: '*/5 * * * *'
-workflow_dispatch:
+ schedule:
+ - cron: '*/5 * * * *'
+ workflow_dispatch:
 
 jobs:
-notify:
-runs-on: ubuntu-latest
-
-steps:
+ notify:
+  runs-on: ubuntu-latest
+  
+  steps:
   - name: Checkout repo
     uses: actions/checkout@v4
     with:
