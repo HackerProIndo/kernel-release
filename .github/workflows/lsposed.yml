@@ -32,6 +32,7 @@ jobs:
           state_path = ".github/last_announced_lsposed_state.txt"
           last_update_id = None
           last_message_id = 0
+          initial_scan = not os.path.isfile(state_path)
 
           if os.path.isfile(state_path):
               try:
@@ -130,6 +131,7 @@ jobs:
 
           new_posts = []
           max_update_id = last_update_id if last_update_id is not None else -1
+          highest_message_id = last_message_id
 
           for upd in updates:
               if upd.get("update_id") is not None:
@@ -146,9 +148,16 @@ jobs:
               message_id = msg.get("message_id")
               if not isinstance(message_id, int):
                   continue
+              highest_message_id = max(highest_message_id, message_id)
               if message_id <= last_message_id:
                   continue
               new_posts.append((message_id, chat.get("id")))
+
+          if initial_scan:
+              if highest_message_id > last_message_id:
+                  write_state(max_update_id, highest_message_id)
+              print(f"Initialized LSPosed channel state at message {highest_message_id}.")
+              sys.exit(0)
 
           if max_update_id >= 0 and max_update_id != (last_update_id or -1):
               write_state(max_update_id, last_message_id)
