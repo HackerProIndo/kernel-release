@@ -32,7 +32,7 @@ jobs:
               data = json.load(r)
 
           tag = data["tag_name"]
-          name = data.get("name", "").strip().replace("\r", "")
+          name = data.get("name", "").strip()
           body = data.get("body", "").strip()
           html_url = data["html_url"]
           assets = [a["browser_download_url"] for a in data.get("assets", []) if a.get("browser_download_url")]
@@ -59,28 +59,47 @@ jobs:
 
       - name: Notify Telegram
         if: steps.last.outputs.last != steps.release.outputs.tag
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          NAME: ${{ steps.release.outputs.name }}
+          BODY: ${{ steps.release.outputs.body }}
+          URL: ${{ steps.release.outputs.url }}
+          APK: ${{ steps.release.outputs.apk }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          cat > message.txt <<EOF
-NEW KERNELSU RELEASE UPDATE
-
-Tag: ${{ steps.release.outputs.tag }}
-Name: ${{ steps.release.outputs.name }}
-
-Changelog:
-${{ steps.release.outputs.body }}
-
-GitHub release:
-${{ steps.release.outputs.url }}
-EOF
-
-          if [ -n "${{ steps.release.outputs.apk }}" ]; then
-            printf '\nAPK:\n' >> message.txt
-            echo "${{ steps.release.outputs.apk }}" | tr ',' '\n' >> message.txt
-          fi
-
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            --data-urlencode chat_id="${{ secrets.CHAT_ID }}" \
-            --data-urlencode text@message.txt
+          python - <<'PY'
+          import os, urllib.parse, urllib.request
+          tag = os.environ["TAG"]
+          name = os.environ["NAME"]
+          body = os.environ["BODY"]
+          url = os.environ["URL"]
+          apk = os.environ.get("APK", "")
+          lines = [
+              "NEW KERNELSU RELEASE UPDATE",
+              "",
+              f"Tag: {tag}",
+              f"Name: {name}",
+              "",
+              "Changelog:",
+              body,
+              "",
+              "GitHub release:",
+              url,
+          ]
+          if apk:
+              lines.extend(["", "APK:"])
+              lines.extend(apk.split(","))
+          text = "\n".join(lines)
+          data = urllib.parse.urlencode({"chat_id": os.environ["CHAT_ID"], "text": text})
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
+              data=data.encode("utf-8"),
+              headers={"Content-Type": "application/x-www-form-urlencoded"},
+          )
+          with urllib.request.urlopen(req) as response:
+              print(response.read().decode())
+          PY
 
       - name: Save announced tag
         if: steps.last.outputs.last != steps.release.outputs.tag
