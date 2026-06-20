@@ -41,7 +41,7 @@ jobs:
           tag = (data.get("tag_name") or "").strip()
           release_name = (data.get("name") or "").strip()
           body = (data.get("body_text") or data.get("body_html") or data.get("body") or "").strip()
-          body = html.escape(body).replace("\n", "<br>")
+          body = html.escape(body)
           html_url = (data.get("html_url") or "").strip()
           apk_url = ""
           apk_name = ""
@@ -68,7 +68,8 @@ jobs:
               print("No new release to announce (tag unchanged).")
               sys.exit(0)
 
-          changelog_link = f"<a href=\"{html_url}\">View changelog</a>" if html_url else (body or "No changelog provided")
+          changelog_link = f"<a href=\"{html_url}\">View changelog</a>" if html_url else "No changelog provided"
+          changelog_text = body if body else "No changelog provided"
           apk_link = f"<a href=\"{apk_url}\">{html.escape(apk_name)}</a>" if apk_url else "Not available"
           repo_link = f"<a href=\"https://github.com/{repo}\">KernelSU</a>"
           release_link = f"<a href=\"{html_url}\">Release page</a>" if html_url else "-"
@@ -80,6 +81,7 @@ jobs:
           <b>Version:</b> {tag}
 
           <b>Changelog:</b> {changelog_link}
+          <pre>{changelog_text}</pre>
 
           🔗 <b>Repository:</b> {repo_link}
           📦 <b>Download APK:</b> {apk_link}
